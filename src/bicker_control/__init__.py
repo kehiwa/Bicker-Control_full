@@ -1,0 +1,1 @@
+"""Bicker UPSI controller application."""

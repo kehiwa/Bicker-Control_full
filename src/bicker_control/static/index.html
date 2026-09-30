@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bicker Control</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">UPS Controller</p>
+          <h1>Bicker Control</h1>
+        </div>
+        <button id="logoutButton" class="secondary hidden">Logout</button>
+      </header>
+
+      <main class="layout">
+        <section id="authPanel" class="panel">
+          <h2>Anmeldung</h2>
+          <form id="loginForm">
+            <label>
+              Benutzer
+              <input id="username" name="username" type="text" required />
+            </label>
+            <label>
+              Passwort
+              <input id="password" name="password" type="password" required />
+            </label>
+            <button type="submit">Login</button>
+          </form>
+          <p id="authError" class="error hidden"></p>
+        </section>
+
+        <section id="statusPanel" class="panel hidden">
+          <h2>Gerätestatus</h2>
+          <div class="stats-grid">
+            <div class="stat-card">
+              <span>Netzbetrieb</span>
+              <strong id="powerState">—</strong>
+            </div>
+            <div class="stat-card">
+              <span>Kommunikation</span>
+              <strong id="commState">—</strong>
+            </div>
+            <div class="stat-card">
+              <span>Akku</span>
+              <strong id="batterySoc">—</strong>
+            </div>
+            <div class="stat-card">
+              <span>Status</span>
+              <strong id="statusValid">—</strong>
+            </div>
+          </div>
+          <button id="refreshStatusButton" class="secondary">Status aktualisieren</button>
+        </section>
+
+        <section id="settingsPanel" class="panel hidden">
+          <h2>Geräteeinstellungen</h2>
+          <div class="settings-row">
+            <label for="backupTime">Backupzeit (s)</label>
+            <input id="backupTime" type="number" min="1" max="3600" value="300" />
+          </div>
+          <button id="saveSettingsButton">Speichern</button>
+          <p id="settingsMessage" class="success hidden"></p>
+        </section>
+
+        <section id="usersPanel" class="panel hidden">
+          <h2>Benutzerverwaltung</h2>
+          <table class="users-table">
+            <thead>
+              <tr>
+                <th>Benutzer</th>
+                <th>Rolle</th>
+                <th>Rechte</th>
+                <th>Aktion</th>
+              </tr>
+            </thead>
+            <tbody id="usersTableBody"></tbody>
+          </table>
+
+          <form id="userCreateForm" class="user-form">
+            <h3>Neuen Benutzer anlegen</h3>
+            <label>
+              Benutzername
+              <input id="newUserName" type="text" required />
+            </label>
+            <label>
+              Rolle
+              <select id="newUserRole">
+                <option value="user">user</option>
+                <option value="admin">admin</option>
+              </select>
+            </label>
+            <label>
+              Passwort
+              <input id="newUserPassword" type="password" required />
+            </label>
+            <label>
+              Rechte (kommagetrennt)
+              <input id="newUserPermissions" type="text" placeholder="view_status, configure_inputs" />
+            </label>
+            <button type="submit">Benutzer anlegen</button>
+          </form>
+          <p id="usersMessage" class="success hidden"></p>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,15 @@
+FROM --platform=linux/arm64 python:3.11-slim-bookworm AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes bash dpkg-dev python3-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY . .
+
+RUN bash ./packaging/build-deb.sh /out
+
+FROM scratch
+COPY --from=builder /out /
