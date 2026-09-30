@@ -35,6 +35,7 @@ class InputChannel:
     active_high: bool = True
     debounce_seconds: float = 0.05
     rate_limit_seconds: float = 1.0
+    profile_seconds: int | None = None
 
     def __post_init__(self) -> None:
         if not self.name or not self.name.strip():
@@ -43,6 +44,8 @@ class InputChannel:
             raise ValueError("GPIO pin must not be negative")
         if self.debounce_seconds < 0 or self.rate_limit_seconds < 0:
             raise ValueError("input timing values must not be negative")
+        if self.profile_seconds is not None and not 1 <= self.profile_seconds <= 0xFFFF:
+            raise ValueError("profile_seconds must be between 1 and 65535")
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +54,7 @@ class InputEvent:
     action: InputAction
     active: bool
     observed_at: float
+    profile_seconds: int | None = None
 
 
 class MemoryGpioBackend:
@@ -197,12 +201,13 @@ class InputService:
         self._stable[channel.name] = active
         self._candidate.pop(channel.name, None)
         if not active:
-            return None
+            # Release edges bypass the rate limit so level-based actions always see the drop.
+            return InputEvent(channel.name, channel.action, False, observed_at, channel.profile_seconds)
         last_event = self._last_event.get(channel.name)
         if last_event is not None and observed_at - last_event < channel.rate_limit_seconds:
             return None
         self._last_event[channel.name] = observed_at
-        return InputEvent(channel.name, channel.action, True, observed_at)
+        return InputEvent(channel.name, channel.action, True, observed_at, channel.profile_seconds)
 
     async def _run(self) -> None:
         while not self._stop.is_set():

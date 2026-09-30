@@ -17,6 +17,23 @@
       </header>
 
       <main class="layout">
+        <section id="bootstrapPanel" class="panel hidden">
+          <h2>Erstinbetriebnahme</h2>
+          <p>Dieses Gerät ist noch nicht initialisiert. Lege das Root-Konto an.</p>
+          <form id="bootstrapForm">
+            <label>
+              Root-Benutzer
+              <input id="bootstrapUsername" type="text" required minlength="3" />
+            </label>
+            <label>
+              Root-Passwort (mind. 12 Zeichen)
+              <input id="bootstrapPassword" type="password" required minlength="12" />
+            </label>
+            <button type="submit">Gerät initialisieren</button>
+          </form>
+          <p id="bootstrapError" class="error hidden"></p>
+        </section>
+
         <section id="authPanel" class="panel">
           <h2>Anmeldung</h2>
           <form id="loginForm">
@@ -70,6 +87,53 @@
           <h2>Eingänge</h2>
           <div id="inputsList" class="inputs-list"></div>
           <p id="inputsMessage" class="success hidden"></p>
+        </section>
+
+        <section id="networkPanel" class="panel hidden">
+          <h2>Netzwerk</h2>
+          <form id="networkForm" class="user-form">
+            <label>
+              Ethernet-Modus
+              <select id="networkMode">
+                <option value="dhcp">DHCP</option>
+                <option value="static">Statisch</option>
+              </select>
+            </label>
+            <label>
+              Adresse (CIDR, z. B. 192.168.1.20/24)
+              <input id="networkAddress" type="text" placeholder="192.168.1.20/24" />
+            </label>
+            <label>
+              Gateway
+              <input id="networkGateway" type="text" placeholder="192.168.1.1" />
+            </label>
+            <label>
+              WLAN-SSID (optional)
+              <input id="networkWifiSsid" type="text" />
+            </label>
+            <label>
+              WLAN-Passwort
+              <input id="networkWifiPassword" type="password" />
+            </label>
+            <button type="submit">Netzwerk anwenden</button>
+          </form>
+          <p id="networkMessage" class="success hidden"></p>
+        </section>
+
+        <section id="eventsPanel" class="panel hidden">
+          <h2>Ereignisse</h2>
+          <table class="users-table">
+            <thead>
+              <tr>
+                <th>Zeit</th>
+                <th>Typ</th>
+                <th>Schwere</th>
+                <th>Quelle</th>
+              </tr>
+            </thead>
+            <tbody id="eventsTableBody"></tbody>
+          </table>
+          <button id="refreshEventsButton" class="secondary">Ereignisse aktualisieren</button>
         </section>
 
         <section id="usersPanel" class="panel hidden">

@@ -1,7 +1,7 @@
 BICKER-CONTROL-MIB DEFINITIONS ::= BEGIN
 
 IMPORTS
-    enterprises, MODULE-IDENTITY, OBJECT-TYPE, Integer32
+    enterprises, MODULE-IDENTITY, OBJECT-TYPE, NOTIFICATION-TYPE, Integer32
         FROM SNMPv2-SMI;
 
 bickerControl MODULE-IDENTITY
@@ -47,5 +47,34 @@ bickerBackupTime OBJECT-TYPE
     STATUS current
     DESCRIPTION "Configured maximum backup time in seconds."
     ::= { bickerControlObjects 5 }
+
+bickerControlEvents OBJECT IDENTIFIER ::= { bickerControl 2 }
+
+bickerEventType OBJECT-TYPE
+    SYNTAX OCTET STRING
+    MAX-ACCESS accessible-for-notify
+    STATUS current
+    DESCRIPTION "Structured event type name."
+    ::= { bickerControlEvents 2 }
+
+bickerEventSeverity OBJECT-TYPE
+    SYNTAX OCTET STRING
+    MAX-ACCESS accessible-for-notify
+    STATUS current
+    DESCRIPTION "Event severity: debug, info, warning, error or critical."
+    ::= { bickerControlEvents 3 }
+
+bickerEventSource OBJECT-TYPE
+    SYNTAX OCTET STRING
+    MAX-ACCESS accessible-for-notify
+    STATUS current
+    DESCRIPTION "Component that produced the event."
+    ::= { bickerControlEvents 4 }
+
+bickerEvent NOTIFICATION-TYPE
+    OBJECTS { bickerEventType, bickerEventSeverity, bickerEventSource }
+    STATUS current
+    DESCRIPTION "Structured controller event forwarded as trap or inform."
+    ::= { bickerControlEvents 1 }
 
 END

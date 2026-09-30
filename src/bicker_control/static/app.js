@@ -1,7 +1,15 @@
 const authPanel = document.getElementById('authPanel');
+const bootstrapPanel = document.getElementById('bootstrapPanel');
+const bootstrapForm = document.getElementById('bootstrapForm');
+const bootstrapError = document.getElementById('bootstrapError');
 const statusPanel = document.getElementById('statusPanel');
 const settingsPanel = document.getElementById('settingsPanel');
 const inputsPanel = document.getElementById('inputsPanel');
+const networkPanel = document.getElementById('networkPanel');
+const networkForm = document.getElementById('networkForm');
+const networkMessage = document.getElementById('networkMessage');
+const eventsPanel = document.getElementById('eventsPanel');
+const eventsTableBody = document.getElementById('eventsTableBody');
 const usersPanel = document.getElementById('usersPanel');
 const logoutButton = document.getElementById('logoutButton');
 const loginForm = document.getElementById('loginForm');
@@ -44,11 +52,14 @@ function updateAuthState() {
     statusPanel.classList.add('hidden');
     settingsPanel.classList.add('hidden');
     inputsPanel.classList.add('hidden');
+    networkPanel.classList.add('hidden');
+    eventsPanel.classList.add('hidden');
     usersPanel.classList.add('hidden');
     logoutButton.classList.add('hidden');
     return;
   }
 
+  bootstrapPanel.classList.add('hidden');
   authPanel.classList.add('hidden');
   statusPanel.classList.remove('hidden');
   settingsPanel.classList.remove('hidden');
@@ -91,6 +102,8 @@ async function login(username, password) {
   await loadStatus();
   await loadUsers();
   await loadInputs();
+  await loadNetwork();
+  await loadEvents();
 }
 
 async function logout() {
@@ -133,6 +146,7 @@ function renderInputs(inputs) {
         ${actions.map((action) => `<option value="${action}" ${action === input.action ? 'selected' : ''}>${action}</option>`).join('')}
       </select>
       <label><input type="checkbox" data-input-polarity ${input.active_high ? 'checked' : ''} /> aktiv high</label>
+      <label>Profil (s) <input type="number" data-input-profile min="1" max="65535" value="${input.profile_seconds ?? ''}" /></label>
       <button data-input-save>Speichern</button>
     </div>
   `).join('');
@@ -152,11 +166,13 @@ async function loadInputs() {
 
 async function saveInput(row) {
   try {
+    const profileValue = row.querySelector('[data-input-profile]').value;
     await api(`/api/v1/inputs/${row.dataset.inputName}`, {
       method: 'PUT',
       body: JSON.stringify({
         action: row.querySelector('[data-input-action]').value,
         active_high: row.querySelector('[data-input-polarity]').checked,
+        profile_seconds: profileValue ? Number(profileValue) : null,
       }),
     });
     inputsMessage.textContent = 'Eingang gespeichert';
@@ -164,6 +180,101 @@ async function saveInput(row) {
   } catch (error) {
     inputsMessage.textContent = error.message;
     inputsMessage.classList.remove('hidden');
+  }
+}
+
+async function loadNetwork() {
+  try {
+    const response = await api('/api/v1/settings/network.config');
+    const config = response.value || {};
+    document.getElementById('networkMode').value = config.ethernet_mode || 'dhcp';
+    document.getElementById('networkAddress').value = config.ethernet_address || '';
+    document.getElementById('networkGateway').value = config.ethernet_gateway || '';
+    document.getElementById('networkWifiSsid').value = config.wifi_ssid || '';
+    networkPanel.classList.remove('hidden');
+  } catch (error) {
+    networkPanel.classList.add('hidden');
+  }
+}
+
+async function saveNetwork(event) {
+  event.preventDefault();
+  const payload = { ethernet_mode: document.getElementById('networkMode').value };
+  const address = document.getElementById('networkAddress').value.trim();
+  const gateway = document.getElementById('networkGateway').value.trim();
+  const ssid = document.getElementById('networkWifiSsid').value.trim();
+  const wifiPassword = document.getElementById('networkWifiPassword').value;
+  if (address) payload.ethernet_address = address;
+  if (gateway) payload.ethernet_gateway = gateway;
+  if (ssid) {
+    payload.wifi_ssid = ssid;
+    payload.wifi_password = wifiPassword;
+  }
+  try {
+    await api('/api/v1/network', { method: 'PUT', body: JSON.stringify(payload) });
+    networkMessage.textContent = 'Netzwerkkonfiguration angewendet';
+    networkMessage.classList.remove('hidden');
+  } catch (error) {
+    networkMessage.textContent = error.message;
+    networkMessage.classList.remove('hidden');
+  }
+}
+
+async function loadEvents() {
+  try {
+    const events = await api('/api/v1/events?limit=50');
+    eventsTableBody.innerHTML = events
+      .slice()
+      .reverse()
+      .map((item) => `
+        <tr>
+          <td>${item.created_at}</td>
+          <td>${item.event_type}</td>
+          <td>${item.severity}</td>
+          <td>${item.source}</td>
+        </tr>
+      `)
+      .join('');
+    eventsPanel.classList.remove('hidden');
+  } catch (error) {
+    eventsPanel.classList.add('hidden');
+  }
+}
+
+async function checkBootstrap() {
+  try {
+    const state = await api('/api/v1/system');
+    if (!state.bootstrapped) {
+      authPanel.classList.add('hidden');
+      bootstrapPanel.classList.remove('hidden');
+    }
+  } catch (error) {
+    // Login form remains available when the state check fails.
+  }
+}
+
+async function runBootstrap(event) {
+  event.preventDefault();
+  bootstrapError.classList.add('hidden');
+  try {
+    const result = await api('/api/v1/bootstrap', {
+      method: 'POST',
+      body: JSON.stringify({
+        username: document.getElementById('bootstrapUsername').value.trim(),
+        password: document.getElementById('bootstrapPassword').value,
+      }),
+    });
+    localStorage.setItem(tokenKey, result.access_token);
+    localStorage.setItem('bicker-control-role', result.role);
+    updateAuthState();
+    await loadStatus();
+    await loadUsers();
+    await loadInputs();
+    await loadNetwork();
+    await loadEvents();
+  } catch (error) {
+    bootstrapError.textContent = error.message;
+    bootstrapError.classList.remove('hidden');
   }
 }
 
@@ -276,6 +387,12 @@ loginForm.addEventListener('submit', async (event) => {
 logoutButton.addEventListener('click', logout);
 document.getElementById('refreshStatusButton').addEventListener('click', loadStatus);
 document.getElementById('saveSettingsButton').addEventListener('click', saveSetting);
+document.getElementById('refreshEventsButton').addEventListener('click', loadEvents);
 userCreateForm.addEventListener('submit', createUser);
+networkForm.addEventListener('submit', saveNetwork);
+bootstrapForm.addEventListener('submit', runBootstrap);
 
 updateAuthState();
+if (!localStorage.getItem(tokenKey)) {
+  checkBootstrap();
+}

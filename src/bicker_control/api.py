@@ -177,19 +177,32 @@ class DevicePolicy:
         self.store.authorize(actor.user_id, "configure_inputs")
         action = InputAction(value.get("action", InputAction.NONE.value))
         active_high = bool(value.get("active_high", True))
+        profile_seconds = value.get("profile_seconds")
+        if profile_seconds is not None:
+            try:
+                profile_seconds = int(profile_seconds)
+            except (TypeError, ValueError) as exc:
+                raise StateValidationError("profile_seconds must be an integer") from exc
         if self.device is None:
             raise StateValidationError("device runtime is not configured")
-        self.device.configure_input(name, action, active_high=active_high)
+        self.device.configure_input(
+            name, action, active_high=active_high, profile_seconds=profile_seconds
+        )
+        configuration = {
+            "action": action.value,
+            "active_high": active_high,
+            "profile_seconds": profile_seconds,
+        }
         self.store.set_setting(
             actor.user_id,
             f"inputs.{name}",
-            {"action": action.value, "active_high": active_high},
+            configuration,
             permission="configure_inputs",
         )
         self.store.append_event(
             "input.configuration.updated",
             source=f"api.inputs.{name}",
-            details={"action": action.value, "active_high": active_high},
+            details=configuration,
         )
         return next(item for item in self.device.input_configuration() if item["name"] == name)
 
@@ -350,6 +363,10 @@ def create_app(
     @app.get("/")
     def index() -> FileResponse:
         return FileResponse(static_dir / "index.html")
+
+    @app.get("/api/v1/system")
+    def system_state() -> dict[str, Any]:
+        return {"bootstrapped": store.is_bootstrapped()}
 
     @app.post("/api/v1/bootstrap")
     def bootstrap(body: BootstrapRequest) -> dict[str, Any]:

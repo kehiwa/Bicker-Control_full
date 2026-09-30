@@ -96,6 +96,11 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("Bicker Control", response.text)
 
+    async def test_system_endpoint_reports_bootstrap_state(self) -> None:
+        response = await self.client.get("/api/v1/system")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["bootstrapped"])
+
     async def test_root_can_list_users(self) -> None:
         self.store.create_user(
             self.root.user_id,

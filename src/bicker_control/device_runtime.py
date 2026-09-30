@@ -15,12 +15,15 @@ from .ups.commands import UpsCommandService
 class RuntimeLimits:
     restart_delay_seconds: int = 30
     root_max_backup_seconds: int = 300
+    default_backup_seconds: int = 60
 
     def __post_init__(self) -> None:
         if not 1 <= self.restart_delay_seconds <= 254:
             raise ValueError("restart delay must be between 1 and 254 seconds")
         if not 1 <= self.root_max_backup_seconds <= 0xFFFF:
             raise ValueError("root backup limit must be between 1 and 65535 seconds")
+        if not 1 <= self.default_backup_seconds <= self.root_max_backup_seconds:
+            raise ValueError("default backup seconds must be within the root limit")
 
 
 class DeviceActionExecutor:
@@ -36,10 +39,13 @@ class DeviceActionExecutor:
         self._store = store
         self._commands = commands
         self._limits = limits
+        self._active_profiles: dict[str, int] = {}
 
     async def handle_input(self, event: InputEvent) -> None:
+        if not event.active and event.action is not InputAction.BACKUP_PROFILE:
+            return
         self._store.append_event(
-            "input.activated",
+            "input.activated" if event.active else "input.released",
             source=f"gpio.{event.channel}",
             details={"action": event.action.value},
         )
@@ -49,11 +55,13 @@ class DeviceActionExecutor:
             elif event.action is InputAction.RESTART:
                 await self._commands.restart_output(self._limits.restart_delay_seconds)
             elif event.action is InputAction.BACKUP_PROFILE:
-                await self._commands.set_backup_time_profile(
-                    enabled=True,
-                    seconds=self._limits.restart_delay_seconds,
-                    root_max_seconds=self._limits.root_max_backup_seconds,
-                )
+                if event.active:
+                    self._active_profiles[event.channel] = (
+                        event.profile_seconds or self._limits.default_backup_seconds
+                    )
+                else:
+                    self._active_profiles.pop(event.channel, None)
+                await self._apply_backup_profiles()
             elif event.action is InputAction.INHIBIT:
                 self._store.append_event(
                     "ups.inhibit.requested",
@@ -71,6 +79,18 @@ class DeviceActionExecutor:
                 severity="error",
                 details={"action": event.action.value, "error": str(exc)},
             )
+
+    async def _apply_backup_profiles(self) -> None:
+        # Shortest requested backup time wins while any profile input is active.
+        if self._active_profiles:
+            enabled, seconds = True, min(self._active_profiles.values())
+        else:
+            enabled, seconds = False, self._limits.default_backup_seconds
+        await self._commands.set_backup_time_profile(
+            enabled=enabled,
+            seconds=seconds,
+            root_max_seconds=self._limits.root_max_backup_seconds,
+        )
 
 
 class DeviceRuntime:
@@ -97,7 +117,14 @@ class DeviceRuntime:
         self._factory_reset = factory_reset
         self._reset_task: asyncio.Task[None] | None = None
 
-    def configure_input(self, name: str, action: InputAction, *, active_high: bool = True) -> None:
+    def configure_input(
+        self,
+        name: str,
+        action: InputAction,
+        *,
+        active_high: bool = True,
+        profile_seconds: int | None = None,
+    ) -> None:
         current = next((channel for channel in self._inputs.channels() if channel.name == name), None)
         if current is None:
             raise ValueError(f"unknown input channel {name!r}")
@@ -109,6 +136,7 @@ class DeviceRuntime:
                 active_high=active_high,
                 debounce_seconds=current.debounce_seconds,
                 rate_limit_seconds=current.rate_limit_seconds,
+                profile_seconds=profile_seconds,
             )
         )
 
@@ -121,6 +149,7 @@ class DeviceRuntime:
                 "active_high": channel.active_high,
                 "debounce_seconds": channel.debounce_seconds,
                 "rate_limit_seconds": channel.rate_limit_seconds,
+                "profile_seconds": channel.profile_seconds,
             }
             for channel in self._inputs.channels()
         ]

@@ -14,6 +14,7 @@ from .api import create_app
 from .device_io import InputAction, InputChannel, LgpioBackend, MemoryGpioBackend, StatusLed
 from .device_runtime import DeviceRuntime
 from .snmp_agent import SnmpAgent, SnmpConfig, SnmpV3User
+from .snmp_traps import SnmpTrapSender
 from .network import MemoryNetworkBackend, NetworkConfig, NetworkService, NmcliBackend
 from .syslog_sink import SyslogSink
 from .state_store import StateStore
@@ -131,7 +132,25 @@ def create_runtime(
 
     syslog_host = os.getenv("BICKER_SYSLOG_HOST", "").strip()
     syslog_sink = SyslogSink(syslog_host, int(os.getenv("BICKER_SYSLOG_PORT", "514"))) if syslog_host else None
-    store = StateStore(state_path, event_sink=syslog_sink)
+    trap_host = os.getenv("BICKER_SNMP_TRAP_HOST", "").strip()
+    trap_sender = (
+        SnmpTrapSender(
+            trap_host,
+            int(os.getenv("BICKER_SNMP_TRAP_PORT", "162")),
+            os.getenv("BICKER_SNMP_TRAP_COMMUNITY", "public"),
+            notify_type=os.getenv("BICKER_SNMP_TRAP_TYPE", "trap"),
+            min_severity=os.getenv("BICKER_SNMP_TRAP_MIN_SEVERITY", "warning"),
+        )
+        if trap_host
+        else None
+    )
+    sinks = tuple(sink for sink in (syslog_sink, trap_sender) if sink is not None)
+
+    def event_sink(event_type: str, severity: str, source: str, details: dict) -> None:
+        for sink in sinks:
+            sink(event_type, severity, source, details)
+
+    store = StateStore(state_path, event_sink=event_sink if sinks else None)
     ups_port = PySerialPort.open(serial_port, baudrate=baudrate, read_timeout=serial_timeout)
     serial = UpsSerialService(ups_port)
     commands = UpsCommandService(serial)
@@ -194,6 +213,7 @@ def create_runtime(
                     channel.name,
                     InputAction(saved.get("action", InputAction.NONE.value)),
                     active_high=bool(saved.get("active_high", channel.active_high)),
+                    profile_seconds=saved.get("profile_seconds"),
                 )
             except (TypeError, ValueError):
                 store.append_event(
@@ -240,6 +260,8 @@ def create_runtime(
         store.close()
         if syslog_sink is not None:
             syslog_sink.close()
+        if trap_sender is not None:
+            trap_sender.close()
 
     app.add_event_handler("startup", _startup)
     app.add_event_handler("shutdown", _shutdown)
