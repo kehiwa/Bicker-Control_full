@@ -74,13 +74,12 @@ Bei mehreren aktiven Backupzeit-Profilen gilt zunächst die kürzeste angeforder
 - **Bereits implementiert:** Status-/Messwertcache in `src/bicker_control/ups/monitor.py`. Status wird im Netzbetrieb alle 5 s, im Batteriebetrieb jede Sekunde gepollt; ein Messwert rotiert je erfolgreichem Zyklus. Nach drei aufeinanderfolgenden Statusfehlern (konfigurierbar) wird die Kommunikation als gestört markiert; Wiederholungen nutzen begrenztes exponentielles Backoff.
 - **Bereits implementiert:** kontrollierte Aktionen in `src/bicker_control/ups/commands.py`. Backupzeitprofile werden gegen UPS- und Root-Grenzen geprüft und per Read-back bestätigt. `UpsOutput`-Restart führt unmittelbar davor innerhalb derselben Serial-Queue eine frische Statusabfrage aus und wird ohne Netzstatus abgelehnt. Shutdown auf Batterie ist standardmässig gesperrt und nur über eine explizite Root-Konfiguration freigebbar.
 - **Bereits implementiert:** SQLite-Store in `src/bicker_control/state_store.py` für einmaliges Root-Bootstrap, scrypt-Passwortverifier, Root/Admin/User-Rollen mit begrenzter Rechteweitergabe, persistente Settings und hashverkettetes Audit.
-- **Bereits implementiert:** gemeinsame `DevicePolicy` und FastAPI-Routen in `src/bicker_control/api.py` für One-time-Bootstrap, Bearer-Login/Logout, Status, Settings, Benutzer/Rechteverwaltung und geschützte UPS-Ausgangsaktionen. SNMP soll dieselbe `DevicePolicy` aufrufen. FastAPI/Uvicorn sind Runtime-Abhängigkeiten; `httpx` gehört zum Testextra.
-- **Als Nächstes:** SNMP-AgentX-Adapter und Web-GUI-Frontend an dieselbe `DevicePolicy` anbinden.
-- Geplant: gemeinsame Autorisierungsprüfung für Web und SNMP; SQLite zusätzlich für Ringlogs.
-- Net-SNMP mit v2c read-only und v3 `authPriv`; SET läuft über die zentrale Policy, nicht als beliebiger serieller Befehl. Standard-UPS-MIB soweit passend plus eigene Bicker-MIB.
-- Firewall, Watchdog und limitierte Systemlogs.
-- IPv4 DHCP/statisch, WLAN-Station, mDNS, NTP; IPv6 optional. Netzwerk-Reset löscht WLAN-Zugang und setzt Ethernet auf DHCP zurück, ohne Benutzer/USV-Konfiguration zu löschen.
-- Logs: konfigurierbare Zustandsänderungen, Alarme und periodische Messwerte. Lokaler Ringpuffer bis 1 GiB, optionaler externer Syslog-Server.
+- **Bereits implementiert:** gemeinsame `DevicePolicy` und FastAPI-Routen in `src/bicker_control/api.py` für One-time-Bootstrap, Bearer-Login/Logout, Status, Settings, Benutzer/Rechteverwaltung, Eingangszuordnung, Netzwerk-Konfiguration, Ereignisse und geschützte UPS-Ausgangsaktionen.
+- **Bereits implementiert:** CM5-GPIO-Adapter über `lgpio`, Memory-Backend für Entwicklung, fünf entprellte/rate-limitierte Eingänge, release-getriggerte Reset-Taste, RGB-Status-LED sowie Netzwerk-/Werksreset.
+- **Bereits implementiert:** SNMPv2c read-only und SNMPv3 `authPriv` über `pysnmp`; Werte und SETs laufen über dieselbe Policy. Die projektbezogene MIB liegt unter `mibs/BICKER-CONTROL-MIB.mib`.
+- **Bereits implementiert:** strukturierte UPS-Ereignis- und Messwertaufzeichnung in SQLite mit konfigurierbarer Byte-Grenze, standardmäßig 1 GiB, sowie geschützte Ereignisabfrage.
+- **Bereits implementiert:** HTTPS-Zertifikat-/Schlüsselparameter, `nmcli`-Netzwerkadapter, Memory-Netzwerkadapter, optionaler UDP-Syslog-Sink und systemd-/ARM64-Paketpfad.
+- Noch offen sind ausschließlich die CM5-/USV-Benchprüfung, die endgültige Hardware-/Power-Validierung sowie Firewall-/Watchdog-Betriebsfreigabe.
 
 ### Entwicklungsinstallation
 

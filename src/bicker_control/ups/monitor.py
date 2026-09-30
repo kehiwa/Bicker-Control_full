@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import time
 from dataclasses import dataclass
-from typing import Mapping, Protocol
+from typing import Awaitable, Callable, Mapping, Protocol
 
 from .protocol import (
     CMD_STATUS_FLAGS,
@@ -103,6 +104,7 @@ class UpsMonitor:
         retry_max_interval: float = 30.0,
         comm_fail_count: int = 3,
         clock=time.monotonic,
+        on_snapshot: Callable[[UpsSnapshot], Awaitable[None] | None] | None = None,
     ) -> None:
         if min(mains_interval, battery_interval, retry_interval, retry_max_interval) <= 0:
             raise ValueError("poll intervals must be positive")
@@ -117,6 +119,7 @@ class UpsMonitor:
         self._retry_max_interval = retry_max_interval
         self._comm_fail_count = comm_fail_count
         self._clock = clock
+        self._on_snapshot = on_snapshot
         self._flags = StatusFlag(0)
         self._status_observed_at: float | None = None
         self._measurements: dict[str, Measurement] = {}
@@ -153,7 +156,12 @@ class UpsMonitor:
         self._consecutive_status_failures = 0
         self._communication_error = None
         await self._poll_one_measurement()
-        return self.snapshot()
+        snapshot = self.snapshot()
+        if self._on_snapshot is not None:
+            result = self._on_snapshot(snapshot)
+            if inspect.isawaitable(result):
+                await result
+        return snapshot
 
     async def start(self, *, poll_immediately: bool = True) -> None:
         if self._task is not None and not self._task.done():

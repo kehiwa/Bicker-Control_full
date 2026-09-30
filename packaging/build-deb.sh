@@ -13,17 +13,19 @@ trap 'rm -rf "$build_dir"' EXIT
 
 mkdir -p "$package_root/DEBIAN" "$package_root/opt/bicker-control" \
   "$package_root/etc/bicker-control" "$package_root/etc/systemd/system" \
-  "$package_root/usr/local/bin"
+  "$package_root/usr/local/bin" "$package_root/usr/share/snmp/mibs"
 
 python3 -m venv "$package_root/opt/bicker-control/venv"
 "$package_root/opt/bicker-control/venv/bin/python" -m pip install --upgrade pip
-"$package_root/opt/bicker-control/venv/bin/python" -m pip install --no-cache-dir "$project_root"
+"$package_root/opt/bicker-control/venv/bin/python" -m pip install --no-cache-dir "$project_root[device]"
 
 ln -s /opt/bicker-control/venv/bin/bicker-control "$package_root/usr/local/bin/bicker-control"
 install -m 0644 "$project_root/packaging/systemd/bicker-control.service" \
   "$package_root/etc/systemd/system/bicker-control.service"
 install -m 0640 "$project_root/packaging/bicker-control.env.example" \
   "$package_root/etc/bicker-control/bicker-control.env"
+install -m 0644 "$project_root/mibs/BICKER-CONTROL-MIB.mib" \
+  "$package_root/usr/share/snmp/mibs/BICKER-CONTROL-MIB.mib"
 
 cat > "$package_root/DEBIAN/control" <<EOF
 Package: $package_name

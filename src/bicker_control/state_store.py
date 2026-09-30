@@ -81,14 +81,34 @@ class AuditEvent:
     event_hash: str
 
 
+@dataclass(frozen=True, slots=True)
+class DeviceEvent:
+    event_id: int
+    created_at: str
+    event_type: str
+    severity: str
+    source: str
+    details: dict[str, Any]
+
+
 class StateStore:
     """Thread-safe SQLite persistence with delegated role capabilities."""
 
-    def __init__(self, database: str | Path) -> None:
+    def __init__(
+        self,
+        database: str | Path,
+        *,
+        max_event_bytes: int = 1 << 30,
+        event_sink: Any | None = None,
+    ) -> None:
+        if max_event_bytes <= 0:
+            raise ValueError("max_event_bytes must be positive")
         database_path = str(database)
         if database_path != ":memory:":
             Path(database_path).parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self._max_event_bytes = max_event_bytes
+        self._event_sink = event_sink
         self._connection = sqlite3.connect(
             database_path,
             timeout=10.0,
@@ -314,6 +334,40 @@ class StateStore:
             return default
         return json.loads(row["value_json"])
 
+    def get_setting_value(self, key: str, default: Any = None) -> Any:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT value_json FROM settings WHERE key = ?", (key,)
+            ).fetchone()
+        if row is None:
+            return default
+        return json.loads(row["value_json"])
+
+    def reset_network_settings(self) -> None:
+        with self._transaction() as connection:
+            connection.execute("DELETE FROM settings WHERE key LIKE 'network.%'")
+            connection.execute(
+                "INSERT INTO settings(key, value_json, updated_at, updated_by) "
+                "SELECT 'network.config', ?, ?, user_id FROM users WHERE role = ? LIMIT 1 "
+                "ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at, updated_by = excluded.updated_by",
+                (self._canonical_json({"ethernet_mode": "dhcp"}), self._now(), ROOT_ROLE),
+            )
+            self._append_audit(
+                connection,
+                actor_id=None,
+                action="network.reset",
+                target="network",
+                details={"mode": "dhcp"},
+            )
+
+    def factory_reset(self) -> None:
+        with self._transaction() as connection:
+            connection.execute("DELETE FROM audit_events")
+            connection.execute("DELETE FROM settings")
+            connection.execute("DELETE FROM device_events")
+            connection.execute("DELETE FROM user_permissions")
+            connection.execute("DELETE FROM users")
+
     def append_audit(
         self,
         actor_id: int | None,
@@ -343,6 +397,66 @@ class StateStore:
                 "SELECT * FROM audit_events ORDER BY event_id DESC LIMIT ?", (limit,)
             ).fetchall()
         return tuple(self._audit_from_row(row) for row in reversed(rows))
+
+    def append_event(
+        self,
+        event_type: str,
+        *,
+        source: str,
+        severity: str = "info",
+        details: dict[str, Any] | None = None,
+    ) -> DeviceEvent:
+        if not event_type or len(event_type) > 128:
+            raise StateValidationError("event type must contain 1..128 characters")
+        if not source or len(source) > 128:
+            raise StateValidationError("event source must contain 1..128 characters")
+        if severity not in {"debug", "info", "warning", "error", "critical"}:
+            raise StateValidationError("invalid event severity")
+        details_value = details or {}
+        details_json = self._canonical_json(details_value)
+        created_at = self._now()
+        with self._transaction() as connection:
+            cursor = connection.execute(
+                "INSERT INTO device_events(created_at, event_type, severity, source, details_json) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (created_at, event_type, severity, source, details_json),
+            )
+            self._prune_device_events(connection)
+            event = DeviceEvent(
+                int(cursor.lastrowid),
+                created_at,
+                event_type,
+                severity,
+                source,
+                details_value,
+            )
+        if self._event_sink is not None:
+            try:
+                self._event_sink(event.event_type, event.severity, event.source, event.details)
+            except Exception:
+                pass
+        return event
+
+    def _prune_device_events(self, connection: sqlite3.Connection) -> None:
+        while True:
+            row = connection.execute(
+                "SELECT COALESCE(SUM(LENGTH(details_json) + LENGTH(event_type) + LENGTH(source) + 64), 0) AS total "
+                "FROM device_events"
+            ).fetchone()
+            if int(row["total"]) <= self._max_event_bytes:
+                return
+            connection.execute(
+                "DELETE FROM device_events WHERE event_id = (SELECT event_id FROM device_events ORDER BY event_id LIMIT 1)"
+            )
+
+    def device_events(self, *, limit: int = 100) -> tuple[DeviceEvent, ...]:
+        if not 1 <= limit <= 10000:
+            raise ValueError("limit must be between 1 and 10000")
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM device_events ORDER BY event_id DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return tuple(self._device_event_from_row(row) for row in reversed(rows))
 
     def verify_audit_chain(self) -> bool:
         with self._lock:
@@ -399,6 +513,14 @@ class StateStore:
                     details_json TEXT NOT NULL,
                     previous_hash TEXT NOT NULL,
                     event_hash TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS device_events (
+                    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    severity TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    details_json TEXT NOT NULL
                 );
                 """
             )
@@ -607,4 +729,15 @@ class StateStore:
             json.loads(row["details_json"]),
             row["previous_hash"],
             row["event_hash"],
+        )
+
+    @classmethod
+    def _device_event_from_row(cls, row: sqlite3.Row) -> DeviceEvent:
+        return DeviceEvent(
+            int(row["event_id"]),
+            row["created_at"],
+            row["event_type"],
+            row["severity"],
+            row["source"],
+            json.loads(row["details_json"]),
         )

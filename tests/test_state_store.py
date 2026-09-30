@@ -139,6 +139,20 @@ class StateStoreTests(unittest.TestCase):
         )
         self.assertFalse(self.store.verify_audit_chain())
 
+    def test_device_events_are_structured_and_persisted(self) -> None:
+        self.store.append_event(
+            "input.activated",
+            source="gpio.IN1",
+            severity="warning",
+            details={"action": "shutdown"},
+        )
+        self.store.close()
+        self.store = StateStore(self.database)
+        events = self.store.device_events()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].event_type, "input.activated")
+        self.assertEqual(events[0].details["action"], "shutdown")
+
     def test_usernames_are_normalized(self) -> None:
         admin = self.store.create_user(
             self.root.user_id,
@@ -149,6 +163,33 @@ class StateStoreTests(unittest.TestCase):
         self.store.grant_permissions(self.root.user_id, admin.user_id, {"view_status"})
         self.assertEqual(admin.username, "mixedcaseadmin")
         self.assertEqual(self.store.authenticate("MIXEDCASEADMIN", "normalized-admin-password-1"), admin)
+
+    def test_network_reset_preserves_users_and_sets_dhcp(self) -> None:
+        self.store.set_setting(self.root.user_id, "network.config", {"ethernet_mode": "static"})
+        self.store.reset_network_settings()
+        self.assertEqual(
+            self.store.get_setting_value("network.config"),
+            {"ethernet_mode": "dhcp"},
+        )
+        self.assertEqual(self.store.authenticate("root-owner", "root-password-long-1"), self.root)
+
+    def test_factory_reset_removes_credentials_configuration_and_history(self) -> None:
+        self.store.set_setting(self.root.user_id, "ups.mode", "auto")
+        self.store.append_event("test.event", source="test")
+        self.store.factory_reset()
+        self.assertFalse(self.store.is_bootstrapped())
+        self.assertEqual(self.store.device_events(), ())
+        with self.assertRaises(AuthenticationError):
+            self.store.authenticate("root-owner", "root-password-long-1")
+
+    def test_device_event_ring_prunes_oldest_entries_by_size(self) -> None:
+        self.store.close()
+        self.store = StateStore(self.database, max_event_bytes=180)
+        self.store.append_event("first", source="test", details={"payload": "a" * 80})
+        self.store.append_event("second", source="test", details={"payload": "b" * 80})
+        events = self.store.device_events()
+        self.assertTrue(events)
+        self.assertEqual(events[-1].event_type, "second")
 
 
 if __name__ == "__main__":

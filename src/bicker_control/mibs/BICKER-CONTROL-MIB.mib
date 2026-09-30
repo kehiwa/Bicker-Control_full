@@ -1,0 +1,51 @@
+BICKER-CONTROL-MIB DEFINITIONS ::= BEGIN
+
+IMPORTS
+    enterprises, MODULE-IDENTITY, OBJECT-TYPE, Integer32
+        FROM SNMPv2-SMI;
+
+bickerControl MODULE-IDENTITY
+    LAST-UPDATED "202609300000Z"
+    ORGANIZATION "Bicker Control"
+    CONTACT-INFO "Bicker Control"
+    DESCRIPTION "UPS controller values exposed by the Bicker Control service."
+    ::= { enterprises 53864 }
+
+bickerControlObjects OBJECT IDENTIFIER ::= { bickerControl 1 }
+
+bickerUpsStatus OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION "Raw UPS status flag bitmask."
+    ::= { bickerControlObjects 1 }
+
+bickerBatterySoc OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION "Battery state of charge in percent."
+    ::= { bickerControlObjects 2 }
+
+bickerInputVoltage OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION "UPS input voltage in millivolts."
+    ::= { bickerControlObjects 3 }
+
+bickerOutputVoltage OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION "UPS output voltage in millivolts."
+    ::= { bickerControlObjects 4 }
+
+bickerBackupTime OBJECT-TYPE
+    SYNTAX Integer32
+    MAX-ACCESS read-write
+    STATUS current
+    DESCRIPTION "Configured maximum backup time in seconds."
+    ::= { bickerControlObjects 5 }
+
+END

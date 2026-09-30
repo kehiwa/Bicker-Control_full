@@ -30,6 +30,8 @@ from .state_store import (
 )
 from .ups.commands import UpsCommandService
 from .ups.monitor import UpsMonitor, UpsSnapshot
+from .network import NetworkConfig, NetworkService
+from .device_io import InputAction
 
 RoleName = Literal["admin", "user"]
 
@@ -99,10 +101,14 @@ class DevicePolicy:
         store: StateStore,
         monitor: UpsMonitor,
         commands: UpsCommandService,
+        network: NetworkService | None = None,
+        device: Any | None = None,
     ) -> None:
         self.store = store
         self.monitor = monitor
         self.commands = commands
+        self.network = network
+        self.device = device
 
     def status(self, actor: User) -> dict[str, Any]:
         self.store.authorize(actor.user_id, "view_status")
@@ -151,9 +157,59 @@ class DevicePolicy:
             details={"permission": permission},
         )
 
+    async def set_network(self, actor: User, value: dict[str, Any]) -> dict[str, Any]:
+        self.store.authorize(actor.user_id, "configure_network")
+        config = NetworkConfig(**value)
+        if self.network is None:
+            raise StateValidationError("network backend is not configured")
+        await self.network.apply(config)
+        self.store.set_setting(actor.user_id, "network.config", value, permission="configure_network")
+        self.store.append_event("network.configuration.applied", source="network", details=value)
+        return value
+
+    def input_configuration(self, actor: User) -> list[dict[str, Any]]:
+        self.store.authorize(actor.user_id, "view_settings")
+        if self.device is None:
+            return []
+        return self.device.input_configuration()
+
+    def configure_input(self, actor: User, name: str, value: dict[str, Any]) -> dict[str, Any]:
+        self.store.authorize(actor.user_id, "configure_inputs")
+        action = InputAction(value.get("action", InputAction.NONE.value))
+        active_high = bool(value.get("active_high", True))
+        if self.device is None:
+            raise StateValidationError("device runtime is not configured")
+        self.device.configure_input(name, action, active_high=active_high)
+        self.store.set_setting(
+            actor.user_id,
+            f"inputs.{name}",
+            {"action": action.value, "active_high": active_high},
+            permission="configure_inputs",
+        )
+        self.store.append_event(
+            "input.configuration.updated",
+            source=f"api.inputs.{name}",
+            details={"action": action.value, "active_high": active_high},
+        )
+        return next(item for item in self.device.input_configuration() if item["name"] == name)
+
     def list_users(self, actor: User) -> list[dict[str, Any]]:
         self.store.authorize(actor.user_id, "manage_users")
         return self.store.list_users(actor.user_id)
+
+    def list_events(self, actor: User, limit: int = 100) -> list[dict[str, Any]]:
+        self.store.authorize(actor.user_id, "view_logs")
+        return [
+            {
+                "event_id": event.event_id,
+                "created_at": event.created_at,
+                "event_type": event.event_type,
+                "severity": event.severity,
+                "source": event.source,
+                "details": event.details,
+            }
+            for event in self.store.device_events(limit=limit)
+        ]
 
     def create_user(
         self,
@@ -251,10 +307,12 @@ def create_app(
     commands: UpsCommandService,
     *,
     session_ttl_seconds: int = 8 * 60 * 60,
+    network: NetworkService | None = None,
+    device: Any | None = None,
 ) -> FastAPI:
     """Create the HTTP adapter around a shared policy service."""
     app = FastAPI(title="Bicker Control", version="0.1.0")
-    policy = DevicePolicy(store, monitor, commands)
+    policy = DevicePolicy(store, monitor, commands, network, device)
     sessions = SessionRegistry(store, session_ttl_seconds=session_ttl_seconds)
     bearer = HTTPBearer(auto_error=False)
     app.state.policy = policy
@@ -331,6 +389,10 @@ def create_app(
     def get_users(actor: User = Depends(current_user)) -> list[dict[str, Any]]:
         return policy.list_users(actor)
 
+    @app.get("/api/v1/events")
+    def get_events(limit: int = 100, actor: User = Depends(current_user)) -> list[dict[str, Any]]:
+        return policy.list_events(actor, limit)
+
     @app.get("/api/v1/settings/{key:path}")
     def get_setting(key: str, actor: User = Depends(current_user)) -> dict[str, Any]:
         return {"key": key, "value": policy.get_setting(actor, key)}
@@ -343,6 +405,21 @@ def create_app(
     ) -> dict[str, Any]:
         policy.set_setting(actor, key, body.value)
         return {"key": key, "value": body.value}
+
+    @app.put("/api/v1/network")
+    async def update_network(
+        body: dict[str, Any],
+        actor: User = Depends(current_user),
+    ) -> dict[str, Any]:
+        return await policy.set_network(actor, body)
+
+    @app.get("/api/v1/inputs")
+    def get_inputs(actor: User = Depends(current_user)) -> list[dict[str, Any]]:
+        return policy.input_configuration(actor)
+
+    @app.put("/api/v1/inputs/{name}")
+    def update_input(name: str, body: dict[str, Any], actor: User = Depends(current_user)) -> dict[str, Any]:
+        return policy.configure_input(actor, name, body)
 
     @app.post("/api/v1/users", status_code=status.HTTP_201_CREATED)
     def create_user(body: UserCreate, actor: User = Depends(current_user)) -> dict[str, Any]:

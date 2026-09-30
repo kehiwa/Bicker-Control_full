@@ -1,6 +1,7 @@
 const authPanel = document.getElementById('authPanel');
 const statusPanel = document.getElementById('statusPanel');
 const settingsPanel = document.getElementById('settingsPanel');
+const inputsPanel = document.getElementById('inputsPanel');
 const usersPanel = document.getElementById('usersPanel');
 const logoutButton = document.getElementById('logoutButton');
 const loginForm = document.getElementById('loginForm');
@@ -9,6 +10,8 @@ const settingsMessage = document.getElementById('settingsMessage');
 const usersMessage = document.getElementById('usersMessage');
 const userCreateForm = document.getElementById('userCreateForm');
 const usersTableBody = document.getElementById('usersTableBody');
+const inputsList = document.getElementById('inputsList');
+const inputsMessage = document.getElementById('inputsMessage');
 
 const tokenKey = 'bicker-control-token';
 const knownPermissions = [
@@ -40,6 +43,7 @@ function updateAuthState() {
     authPanel.classList.remove('hidden');
     statusPanel.classList.add('hidden');
     settingsPanel.classList.add('hidden');
+    inputsPanel.classList.add('hidden');
     usersPanel.classList.add('hidden');
     logoutButton.classList.add('hidden');
     return;
@@ -86,6 +90,7 @@ async function login(username, password) {
   updateAuthState();
   await loadStatus();
   await loadUsers();
+  await loadInputs();
 }
 
 async function logout() {
@@ -117,6 +122,49 @@ async function loadStatus() {
     ? `${response.measurements.battery_soc.value}%`
     : '—';
   document.getElementById('statusValid').textContent = response.status_valid ? 'Aktiv' : 'Alt';
+}
+
+function renderInputs(inputs) {
+  const actions = ['none', 'inhibit', 'backup_profile', 'shutdown', 'restart', 'event'];
+  inputsList.innerHTML = inputs.map((input) => `
+    <div class="input-config" data-input-name="${input.name}">
+      <strong>${input.name}</strong>
+      <select data-input-action>
+        ${actions.map((action) => `<option value="${action}" ${action === input.action ? 'selected' : ''}>${action}</option>`).join('')}
+      </select>
+      <label><input type="checkbox" data-input-polarity ${input.active_high ? 'checked' : ''} /> aktiv high</label>
+      <button data-input-save>Speichern</button>
+    </div>
+  `).join('');
+  inputsList.querySelectorAll('[data-input-save]').forEach((button) => {
+    button.addEventListener('click', () => saveInput(button.closest('[data-input-name]')));
+  });
+}
+
+async function loadInputs() {
+  try {
+    renderInputs(await api('/api/v1/inputs'));
+    inputsPanel.classList.remove('hidden');
+  } catch (error) {
+    inputsPanel.classList.add('hidden');
+  }
+}
+
+async function saveInput(row) {
+  try {
+    await api(`/api/v1/inputs/${row.dataset.inputName}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        action: row.querySelector('[data-input-action]').value,
+        active_high: row.querySelector('[data-input-polarity]').checked,
+      }),
+    });
+    inputsMessage.textContent = 'Eingang gespeichert';
+    inputsMessage.classList.remove('hidden');
+  } catch (error) {
+    inputsMessage.textContent = error.message;
+    inputsMessage.classList.remove('hidden');
+  }
 }
 
 function renderUsers(users) {

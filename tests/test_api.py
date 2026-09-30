@@ -5,6 +5,9 @@ from pathlib import Path
 import httpx
 
 from bicker_control.api import create_app
+from bicker_control.device_io import InputAction, InputChannel, MemoryGpioBackend
+from bicker_control.device_runtime import DeviceRuntime
+from bicker_control.network import MemoryNetworkBackend, NetworkService
 from bicker_control.state_store import ADMIN_ROLE, USER_ROLE, StateStore
 from bicker_control.ups.monitor import UpsMonitor
 
@@ -35,8 +38,22 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         self.root = self.store.create_initial_root("root-owner", "root-password-long-1")
         self.monitor = UpsMonitor(FakeReader())
         self.commands = FakeCommands()
+        self.device = DeviceRuntime(
+            self.store,
+            self.commands,
+            MemoryGpioBackend(),
+            (InputChannel("IN1", 5),),
+        )
         self.client = httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=create_app(self.store, self.monitor, self.commands)),
+            transport=httpx.ASGITransport(
+                app=create_app(
+                    self.store,
+                    self.monitor,
+                    self.commands,
+                    network=NetworkService(MemoryNetworkBackend()),
+                    device=self.device,
+                )
+            ),
             base_url="http://testserver",
         )
 
@@ -93,6 +110,46 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         users = response.json()
         self.assertTrue(any(user["username"] == "root-owner" for user in users))
         self.assertTrue(any(user["username"] == "service-user" for user in users))
+
+    async def test_admin_can_configure_inputs_and_changes_are_live(self) -> None:
+        admin = self.store.create_user(
+            self.root.user_id,
+            "input-admin",
+            ADMIN_ROLE,
+            "input-admin-password-1",
+        )
+        self.store.grant_permissions(self.root.user_id, admin.user_id, {"configure_inputs", "view_settings"})
+        headers = await self.login(admin.username, "input-admin-password-1")
+        response = await self.client.put(
+            "/api/v1/inputs/IN1",
+            headers=headers,
+            json={"action": "restart", "active_high": False},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["action"], InputAction.RESTART.value)
+        self.assertFalse(response.json()["active_high"])
+        self.assertEqual(self.device.input_configuration()[0]["action"], InputAction.RESTART.value)
+
+        listed = await self.client.get("/api/v1/inputs", headers=headers)
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(listed.json()[0]["action"], InputAction.RESTART.value)
+
+    async def test_logs_require_permission_and_return_device_events(self) -> None:
+        self.store.append_event("ups.status", source="ups.monitor", details={"online": True})
+        user = self.store.create_user(
+            self.root.user_id,
+            "readonly-events-user",
+            USER_ROLE,
+            "readonly-events-password-1",
+        )
+        user_headers = await self.login(user.username, "readonly-events-password-1")
+        denied = await self.client.get("/api/v1/events", headers=user_headers)
+        self.assertEqual(denied.status_code, 403)
+
+        root_headers = await self.login("root-owner", "root-password-long-1")
+        response = await self.client.get("/api/v1/events", headers=root_headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()[0]["event_type"], "ups.status")
 
     async def test_authentication_and_status_permission(self) -> None:
         no_token = await self.client.get("/api/v1/status")
